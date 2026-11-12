@@ -112,6 +112,17 @@ jobs:
 
           except urllib.error.HTTPError as error:
               print(stage + " HTTP error: " + str(error.code))
+              if stage == "Gemini":
+                  try:
+                      detail = json.loads(
+                          error.read().decode("utf-8")
+                      ).get("error", {}).get("message", "")
+                      for secret in values.values():
+                          if secret:
+                              detail = detail.replace(secret, "[REDACTED]")
+                      print("Gemini detail: " + detail[:1500])
+                  except Exception:
+                      print("Gemini detail: could not read the error response.")
               raise SystemExit(1)
           except Exception:
               print(stage + " connection or response error.")
