@@ -56,7 +56,7 @@ jobs:
           try:
               result = post(
                   "https://generativelanguage.googleapis.com/v1beta/models/"
-                  "gemini-2.5-flash-lite:generateContent",
+                  "gemini-3.5-flash-lite:generateContent",
                   {
                       "contents": [{
                           "parts": [{
@@ -68,8 +68,7 @@ jobs:
                           }]
                       }],
                       "generationConfig": {
-                          "maxOutputTokens": 256,
-                          "thinkingConfig": {"thinkingBudget": 0},
+                          "maxOutputTokens": 1024,
                       },
                   },
                   {"x-goog-api-key": values["GEMINI_API_KEY"]},
