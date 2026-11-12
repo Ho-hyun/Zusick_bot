@@ -1,0 +1,121 @@
+name: Gemini Test
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+
+    steps:
+      - name: Test Gemini and Telegram
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+
+          def post(url, payload, headers=None):
+              request = urllib.request.Request(
+                  url,
+                  data=json.dumps(payload).encode("utf-8"),
+                  headers={
+                      "Content-Type": "application/json",
+                      **(headers or {}),
+                  },
+                  method="POST",
+              )
+              with urllib.request.urlopen(request, timeout=60) as response:
+                  return json.load(response)
+
+          names = [
+              "GEMINI_API_KEY",
+              "TELEGRAM_BOT_TOKEN",
+              "TELEGRAM_CHAT_ID",
+          ]
+          values = {
+              name: os.environ.get(name, "").strip()
+              for name in names
+          }
+
+          missing = [name for name in names if not values[name]]
+          if missing:
+              print("Secret missing: " + ", ".join(missing))
+              raise SystemExit(1)
+
+          stage = "Gemini"
+
+          try:
+              result = post(
+                  "https://generativelanguage.googleapis.com/v1beta/models/"
+                  "gemini-2.5-flash:generateContent",
+                  {
+                      "contents": [{
+                          "parts": [{
+                              "text": (
+                                  "한국어로 한 문장만 작성하세요: "
+                                  "미국장 브리핑 봇의 한국어 요약 "
+                                  "연결 테스트가 완료되었습니다."
+                              )
+                          }]
+                      }],
+                      "generationConfig": {
+                          "maxOutputTokens": 256,
+                          "thinkingConfig": {"thinkingBudget": 0},
+                      },
+                  },
+                  {"x-goog-api-key": values["GEMINI_API_KEY"]},
+              )
+
+              candidates = result.get("candidates", [])
+              parts = (
+                  candidates[0].get("content", {}).get("parts", [])
+                  if candidates else []
+              )
+              text = "".join(
+                  part.get("text", "")
+                  for part in parts
+                  if not part.get("thought")
+              ).strip()
+
+              if not text:
+                  print("Gemini returned no text.")
+                  raise SystemExit(1)
+
+              stage = "Telegram"
+
+              sent = post(
+                  "https://api.telegram.org/bot"
+                  + values["TELEGRAM_BOT_TOKEN"]
+                  + "/sendMessage",
+                  {
+                      "chat_id": values["TELEGRAM_CHAT_ID"],
+                      "text": (
+                          "[Gemini 연결 테스트]\n\n"
+                          + text[:1500]
+                          + "\n\n이 메시지는 실제 금융 뉴스가 아닙니다."
+                      ),
+                  },
+              )
+
+              if not sent.get("ok"):
+                  print("Telegram did not confirm delivery.")
+                  raise SystemExit(1)
+
+          except urllib.error.HTTPError as error:
+              print(stage + " HTTP error: " + str(error.code))
+              raise SystemExit(1)
+          except Exception:
+              print(stage + " connection or response error.")
+              raise SystemExit(1)
+
+          print("Success: Gemini response delivered to Telegram.")
+          PY
