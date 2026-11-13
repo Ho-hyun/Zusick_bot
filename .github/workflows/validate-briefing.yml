@@ -77,7 +77,10 @@ jobs:
                   if change is not None:
                       quotes[symbol]['weekly_pct'] = change
                   quotes[symbol]['weekly_volume_ratio'] = 1.5
+              fixtures['A']['revenueGrowth'] = 0.1
               weekly = scope['collect_candidates'](quotes,list(fixtures),context)
+              assert weekly['value'][0]['weekly_pct'] == 6
+              assert weekly['value'][0]['weekly_relative_pp'] == 7
               assert [r['symbol'] for r in weekly['leaders']] == ['A']
               up, down = scope['select_movers'](quotes,list(fixtures),True)
               assert [r['symbol'] for r in up] == ['A']
@@ -91,7 +94,9 @@ jobs:
               assert '주간 수익률 미확인' in layout['_market_roast'](roast_data,{})
               data['candidates'] = weekly
               messages = layout['build_messages'](data,{})
-              assert any('주간 주도주 후보' in m for m in messages)
+              assert any('금주의 주도주 후보' in m for m in messages)
+              assert any('금주의 상대 저평가 검토 후보' in m for m in messages)
+              assert any('⑥ 금주의 종목 후보' in m for m in messages)
               assert any('이번 주 한 줄 평' in m for m in messages)
               assert any('주간 급등락' in m for m in messages)
               assert any('주간 미확인' in m for m in messages)
