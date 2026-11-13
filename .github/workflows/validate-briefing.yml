@@ -68,6 +68,34 @@ jobs:
               messages = layout['build_messages'](data,{})
               assert any('오늘의 종목 후보' in m for m in messages)
               assert all(layout['_units'](m) <= 3400 for m in messages)
+              # Weekly returns must win when daily and weekly directions disagree.
+              context['weekly'] = True
+              context['week_reference'] = '2026-11-06'
+              quotes['^GSPC']['weekly_pct'] = -1
+              for symbol, change in [('A',6),('B',-8),('C',None)]:
+                  quotes[symbol].update(symbol=symbol, pct=-2 if symbol == 'A' else 7)
+                  if change is not None:
+                      quotes[symbol]['weekly_pct'] = change
+                  quotes[symbol]['weekly_volume_ratio'] = 1.5
+              weekly = scope['collect_candidates'](quotes,list(fixtures),context)
+              assert [r['symbol'] for r in weekly['leaders']] == ['A']
+              up, down = scope['select_movers'](quotes,list(fixtures),True)
+              assert [r['symbol'] for r in up] == ['A']
+              assert [r['symbol'] for r in down] == ['B']
+              del quotes['A']['weekly_volume_ratio']
+              assert scope['collect_candidates'](quotes,list(fixtures),context)['leaders'] == []
+              roast_data = {'context':context,'quotes':{'^GSPC':{'pct':2,'weekly_pct':-2},'NVDA':{'pct':3,'weekly_pct':-4}}}
+              line = layout['_market_roast'](roast_data,{})
+              assert '이번 주' in line and '엔비디아도 지수도 하락' in line
+              del roast_data['quotes']['^GSPC']['weekly_pct']
+              assert '주간 수익률 미확인' in layout['_market_roast'](roast_data,{})
+              data['candidates'] = weekly
+              messages = layout['build_messages'](data,{})
+              assert any('주간 주도주 후보' in m for m in messages)
+              assert any('이번 주 한 줄 평' in m for m in messages)
+              assert any('주간 급등락' in m for m in messages)
+              assert any('주간 미확인' in m for m in messages)
+              assert all(layout['_units'](m) <= 3400 for m in messages)
               print('PASS: workflow syntax; factual roast; valuation rules; missing peers; message layout')
               status, description = 'success', 'Syntax, factual roast, candidate rules and layout passed'
           except Exception as error:
