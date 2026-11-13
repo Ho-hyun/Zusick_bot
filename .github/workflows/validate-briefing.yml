@@ -1,0 +1,85 @@
+name: Validate Briefing Rules
+on:
+  push:
+    paths:
+      - '.github/workflows/market-briefing.yml'
+      - '.github/workflows/validate-briefing.yml'
+permissions:
+  contents: read
+  statuses: write
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install PyYAML requests
+      - name: Verify syntax and data-based behavior without AI or Telegram
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import ast, json, re, sys, types, os
+          from pathlib import Path
+          import yaml, requests
+          status = 'failure'
+          description = 'Validation failed'
+          try:
+              source = Path('.github/workflows/market-briefing.yml').read_text()
+              yaml.safe_load(source)
+              modules = {}
+              for tag in ('PYPROVIDER','PYLAYOUT','PY_MACRO_DATA','PY_MACRO_QUOTES','PY_MACRO_CARD','PYMAIN','PYCANDIDATES'):
+                  match = re.search(r"<<'" + tag + r"'\n(.*?)^          " + tag + r"$", source, re.M | re.S)
+                  assert match, tag
+                  body = '\n'.join(line[10:] if line.startswith(' ' * 10) else line for line in match[1].splitlines())
+                  ast.parse(body)
+                  modules[tag] = body
+              layout = {}
+              exec(modules['PYLAYOUT'], layout)
+              data = {'quotes': {'^GSPC': {'pct': -1.5}, 'NVDA': {'pct': -2.0}}}
+              line = layout['_market_roast'](data, {'market_roast': '엔비디아 상승'})
+              assert '엔비디아도 지수도 하락' in line and '엔비디아 상승' not in line
+              data['quotes']['NVDA']['pct'] = 2
+              assert '엔비디아는 상승' in layout['_market_roast'](data, {})
+              data['quotes']['NVDA']['pct'] = -2
+              data['quotes']['^GSPC']['pct'] = 1
+              assert '엔비디아는 상승' not in layout['_market_roast'](data, {})
+              assert '미확인' in layout['_market_roast']({'quotes': {}}, {})
+              fixtures = {
+                  'A': {'quoteType':'EQUITY','industry':'Semiconductors','trailingPE':10,'returnOnEquity':0.2,'revenueGrowth':0.1,'debtToEquity':20},
+                  'B': {'quoteType':'EQUITY','industry':'Semiconductors','trailingPE':30},
+                  'C': {'quoteType':'EQUITY','industry':'Semiconductors','trailingPE':40}}
+              sys.modules['yfinance'] = types.SimpleNamespace(Ticker=lambda symbol: types.SimpleNamespace(get_info=lambda:fixtures[symbol]))
+              scope = {}
+              exec(modules['PYCANDIDATES'], scope)
+              quotes = {s:{'close':100,'volume':100,'pct':2,'volume_ratio':1.5} for s in fixtures}
+              quotes['^GSPC'] = {'pct':1}
+              context = {'asof':'2026-11-13T08:00:00+00:00','session':'2026-11-12'}
+              result = scope['collect_candidates'](quotes,list(fixtures),context)
+              assert [r['symbol'] for r in result['value']] == ['A']
+              assert len(result['leaders']) == 2
+              fixtures['A']['revenueGrowth'] = -0.1
+              assert scope['collect_candidates'](quotes,list(fixtures),context)['value'] == []
+              assert scope['collect_candidates'](quotes,['A','B'],context)['value'] == []
+              data = {'context':context,'quotes':quotes,'members':{'A':'A회사','B':'B회사','C':'C회사'},'watch':list(fixtures),'candidates':result}
+              messages = layout['build_messages'](data,{})
+              assert any('오늘의 종목 후보' in m for m in messages)
+              assert all(layout['_units'](m) <= 3400 for m in messages)
+              print('PASS: workflow syntax; factual roast; valuation rules; missing peers; message layout')
+              status, description = 'success', 'Syntax, factual roast, candidate rules and layout passed'
+          except Exception as error:
+              import traceback
+              traceback.print_exc()
+          finally:
+              response = requests.post('https://api.github.com/repos/' + os.environ['GITHUB_REPOSITORY'] + '/statuses/' + os.environ['GITHUB_SHA'],
+                  headers={'Authorization':'Bearer ' + os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'},
+                  json={'state':status,'context':'briefing-validation','description':description},
+                  timeout=20)
+              response.raise_for_status()
+          if status != 'success':
+              raise SystemExit(1)
+          
+          PY
