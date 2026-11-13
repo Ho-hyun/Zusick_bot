@@ -1162,7 +1162,7 @@ jobs:
           from macro_data import collect_macro
           from macro_quotes import collect_risk_quotes
           from macro_card import render_summary_card
-          'Public official-calendar reads; no fabricated dates and no empty-body parse.'
+          """Public official-calendar reads; no fabricated dates and no empty-body parse."""
           from datetime import datetime, timedelta
           import re
           from zoneinfo import ZoneInfo
@@ -1290,6 +1290,46 @@ jobs:
                           rows.append(result)
               return rows
 
+          def parse_nyfed_html(raw, source, start, end, asof):
+              """NY Fed's tentative calendar, restricted to BLS-linked releases."""
+              soup = BeautifulSoup(raw, 'html.parser')
+              match = re.search('/i-([a-z]{3})(\\d{2})\\.html$', source)
+              months = ('jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec')
+              if not match or match[1] not in months:
+                  raise ValueError('calendar month missing')
+              year, month = (2000 + int(match[2]), months.index(match[1]) + 1)
+              heading = datetime(year, month, 1).strftime('%B %Y')
+              text = soup.get_text(' ', strip=True)
+              if heading not in text or not re.search('all Eastern Time', text, re.I):
+                  raise ValueError('calendar month/timezone unconfirmed')
+              cells = soup.select('table.research-table-1col td.somatdR')
+              if not cells:
+                  raise ValueError('NY Fed calendar missing')
+              rows = []
+              for cell in cells:
+                  day = re.match('^(\\d{1,2})\\b', cell.get_text(' ', strip=True))
+                  if not day:
+                      continue
+                  for link in cell.select('a[href]'):
+                      if not re.match('https?://(?:www\\.)?bls\\.gov/', link['href']):
+                          continue
+                      title = link.get_text(' ', strip=True)
+                      if not (_important(title) or title.upper() == 'JOLTS'):
+                          continue
+                      following = []
+                      for sibling in link.next_siblings:
+                          if getattr(sibling, 'name', None) == 'a':
+                              break
+                          following.append(sibling.get_text(' ', strip=True) if hasattr(sibling, 'get_text') else str(sibling))
+                      stamp = re.search('\\((\\d{2}:\\d{2})\\)', ' '.join(following))
+                      date = datetime(year, month, int(day[1])).date()
+                      when = datetime.combine(date, datetime.strptime(stamp[1], '%H:%M').time(), NY) if stamp else date
+                      row = _row(title, when, source, start, end, asof)
+                      if row:
+                          row['schedule_status'] = 'tentative'
+                          rows.append(row)
+              return rows
+
           def collect_calendar_events(start, end, asof, fetch=None):
               """Return events/warnings/notes; recovered ICS problems stay in notes only."""
               fetch = fetch or _fetch
@@ -1318,6 +1358,24 @@ jobs:
                           recovered = True
                       except Exception:
                           failures.append('HTML 일정 형식 오류')
+                  if agency == 'BLS' and (failures or not recovered):
+                      fallback_rows, fallback_errors = ([], [])
+                      for year, month in months:
+                          month_name = ('jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec')[month - 1]
+                          url = f'https://www.newyorkfed.org/research/calendars/i-{month_name}{year % 100:02d}.html'
+                          raw, fallback_error = fetch(url)
+                          try:
+                              if not raw:
+                                  raise ValueError(fallback_error or '빈 응답')
+                              fallback_rows.extend(parse_nyfed_html(raw, url, start, end, asof))
+                          except ValueError as exc:
+                              fallback_errors.append(str(exc))
+                      if not fallback_errors:
+                          output['events'] = [row for row in output['events'] if 'bls.gov/' not in row['source']]
+                          output['events'].extend(fallback_rows)
+                          output['notes'].append('BLS 접근 제한 → 뉴욕 연준 공식 일정 사용 (잠정·변경 가능)')
+                          continue
+                      failures.extend(fallback_errors)
                   if recovered:
                       output['notes'].append(agency + ': ' + (error or 'ICS 응답 없음') + ' → 공식 HTML 일정 사용')
                   if failures or not recovered:
