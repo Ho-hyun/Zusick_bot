@@ -4,6 +4,9 @@ on:
     paths:
       - '.github/workflows/market-briefing.yml'
       - '.github/workflows/validate-briefing.yml'
+      - '.github/workflows/weekend-news.yml'
+      - 'scripts/weekend_briefing.py'
+      - 'scripts/test_weekend_briefing.py'
 permissions:
   contents: read
   statuses: write
@@ -16,7 +19,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install PyYAML requests
+      - run: python -m pip install PyYAML requests feedparser==6.0.14 exchange-calendars==4.13.2
       - name: Verify syntax and data-based behavior without AI or Telegram
         env:
           GH_TOKEN: ${{ github.token }}
@@ -136,6 +139,12 @@ jobs:
               responses[:] = [FakeResponse(200,b'<html>blocked</html>'),FakeResponse(200,b'RSS')]
               assert rss_scope['_load_news_feed'](primary,'연준 RSS')['briefing_source'] == '연준 관련 뉴스 검색 RSS'
               assert not notices
+              yaml.safe_load(Path('.github/workflows/weekend-news.yml').read_text())
+              ast.parse(Path('scripts/weekend_briefing.py').read_text())
+              import unittest
+              sys.path.insert(0, str(Path('scripts').resolve()))
+              suite = unittest.defaultTestLoader.discover('scripts', pattern='test_weekend_briefing.py')
+              assert unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful()
               print('PASS: workflow syntax; factual roast; valuation rules; missing peers; message layout')
               status, description = 'success', 'Syntax, factual roast, candidate rules and layout passed'
           except Exception as error:
