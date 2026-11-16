@@ -454,7 +454,7 @@ jobs:
               return ''.join(result)
 
           def _ko(value, fallback='', limit=600):
-              value = re.sub('\\s*\\[n\\d+\\]', '', value) if isinstance(value, str) else value
+              value = re.sub(r'\s*\[\s*n\d+(?:\s*[,，;]\s*n\d+)*\s*\]', '', value, flags=re.I) if isinstance(value, str) else value
               if isinstance(value, str) and re.search('[가-힣]', value):
                   return _e(value, limit)
               return fallback
@@ -1092,7 +1092,7 @@ jobs:
               if not isinstance(value, str):
                   return ''
               value = html.unescape(re.sub('<[^>]+>', '', value))
-              value = re.sub(r'\s*\[n\d+\]', '', value)
+              value = re.sub(r'\s*\[\s*n\d+(?:\s*[,，;]\s*n\d+)*\s*\]', '', value, flags=re.I)
               value = re.sub('[\U0001F000-\U0001FAFF\u200d\ufe0f]', '', value)
               return re.sub(r'\s+', ' ', value).strip()
 
