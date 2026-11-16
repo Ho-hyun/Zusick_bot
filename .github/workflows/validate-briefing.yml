@@ -101,6 +101,41 @@ jobs:
               assert any('주간 급등락' in m for m in messages)
               assert any('주간 미확인' in m for m in messages)
               assert all(layout['_units'](m) <= 3400 for m in messages)
+              # Isolate the RSS loader without executing the live collection/broadcast.
+              main_tree = ast.parse(modules['PYMAIN'])
+              loader = next(n for n in main_tree.body if isinstance(n, ast.FunctionDef) and n.name == '_load_news_feed')
+              class Feed(dict):
+                  def __getattr__(self, key):
+                      return self[key]
+              class FakeResponse:
+                  def __init__(self, status, content):
+                      self.status_code, self.content = status, content
+              def fake_parse(raw):
+                  return Feed(version='rss20' if raw == b'RSS' else '', bozo=raw != b'RSS', entries=[])
+              responses, calls, notices = [], [], []
+              def fake_get(url, **kwargs):
+                  calls.append(url)
+                  return responses.pop(0)
+              rss_scope = {'requests':types.SimpleNamespace(get=fake_get),
+                           'feedparser':types.SimpleNamespace(parse=fake_parse),
+                           'warnings':notices,'UA':{}}
+              exec(compile(ast.Module(body=[loader],type_ignores=[]),'<rss-loader>','exec'),rss_scope)
+              primary = 'https://www.federalreserve.gov/feeds/press_all.xml'
+              responses[:] = [FakeResponse(404,b''),FakeResponse(200,b'RSS')]
+              recovered = rss_scope['_load_news_feed'](primary,'연준 RSS')
+              assert recovered['briefing_source'] == '연준 관련 뉴스 검색 RSS'
+              assert not notices and len(calls) == 2 and 'news.google.com/rss/search?' in calls[1]
+              calls.clear()
+              responses[:] = [FakeResponse(200,b'RSS')]
+              assert rss_scope['_load_news_feed'](primary,'연준 RSS')['briefing_source'] == '연준 공식 RSS'
+              assert len(calls) == 1  # A valid empty feed is not an outage.
+              responses[:] = [FakeResponse(403,b''),FakeResponse(404,b'')]
+              rss_scope['_load_news_feed'](primary,'연준 RSS')
+              assert len(notices) == 1 and 'HTTP 403' in notices[0] and 'HTTP 404' in notices[0]
+              notices.clear()
+              responses[:] = [FakeResponse(200,b'<html>blocked</html>'),FakeResponse(200,b'RSS')]
+              assert rss_scope['_load_news_feed'](primary,'연준 RSS')['briefing_source'] == '연준 관련 뉴스 검색 RSS'
+              assert not notices
               print('PASS: workflow syntax; factual roast; valuation rules; missing peers; message layout')
               status, description = 'success', 'Syntax, factual roast, candidate rules and layout passed'
           except Exception as error:
