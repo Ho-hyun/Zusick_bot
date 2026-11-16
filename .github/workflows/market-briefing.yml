@@ -389,6 +389,38 @@ jobs:
                   value += ' · 주간 ' + (_pct(row['weekly_pct']) if row.get('weekly_pct') is not None else '미확인')
               return value
 
+          def _market_recap(data):
+              context = data.get('context', data)
+              quotes = data.get('quotes', data.get('market', {}).get('quotes', {}))
+              weekly = bool(context.get('weekly'))
+              key = 'weekly_pct' if weekly else 'pct'
+              period = '이번 주' if weekly else '오늘'
+              def change(symbol):
+                  try:
+                      value = float(quotes[symbol][key])
+                      return value if math.isfinite(value) else None
+                  except (KeyError, ValueError, TypeError):
+                      return None
+              market, sector = change('^GSPC'), change('^SOX')
+              if market is None:
+                  lines = [period + ' 전체 시장 흐름은 수익률 자료가 부족해 판단을 보류합니다.']
+              elif abs(market) < 0.3:
+                  lines = [period + ' S&P 500은 큰 변화 없이 마감했습니다.']
+              else:
+                  lines = [period + ' S&P 500은 ' + ('올랐습니다.' if market > 0 else '내렸습니다.')]
+              for symbol, name in [('^GSPC', 'S&P 500'), ('^IXIC', '나스닥'), ('^SOX', '반도체 지수'), ('SOXL', 'SOXL')]:
+                  value = change(symbol)
+                  lines.append(name + ': ' + (_pct(value) if value is not None else '미확인'))
+              if market is not None and sector is not None:
+                  if sector > market + 0.5:
+                      lines.append('반도체는 S&P 500보다 수익률이 높았습니다.')
+                  elif sector < market - 0.5:
+                      lines.append('반도체는 S&P 500보다 수익률이 낮았습니다.')
+                  else:
+                      lines.append('반도체와 S&P 500의 수익률 차이는 크지 않았습니다.')
+              lines.append('기준: ' + ('직전 주 마지막 거래일 종가 대비 이번 주 종가' if weekly else '직전 거래일 종가 대비 오늘 종가'))
+              return '\n'.join(_e(line, 250) for line in lines)
+
           def _market_roast(data, summary):
               """Pick a joke from verified prices; never display AI-generated factual claims."""
               quotes = data.get('quotes', data.get('market', {}).get('quotes', {}))
@@ -720,6 +752,7 @@ jobs:
               if notices:
                   groups[-1][1].append('<b>자료 확인</b>\n' + '\n'.join(('• ' + _e(value, 230) for value in list(dict.fromkeys((str(item) for item in notices)))[:3])))
               groups.append(('⑧ 이번 주 한 줄 평' if context.get('weekly') else '⑦ 오늘 장 한 줄 평', [_market_roast(data, summary)]))
+              groups.append(('📌 이번 주 장세 요약' if context.get('weekly') else '📌 오늘 장세 요약', [_market_recap(data)]))
               pages = []
               budget = limit - 220
               for title, blocks in groups:
