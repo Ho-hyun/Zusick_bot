@@ -1074,11 +1074,13 @@ jobs:
               ]:
                   record = quotes.get(symbol, {})
                   close = finite(record.get('close'))
+                  if close is None:
+                      continue
                   value = number(close, suffix='%' if kind == 'yield' else '')
                   if kind in ('oil', 'equity') and close is not None:
                       value = '$' + value
                   change = yield_change(record) if kind == 'yield' else finite(record.get('pct'))
-                  change_text = number(change, suffix='%p' if kind == 'yield' else '%', signed=True)
+                  change_text = number(change, suffix='%p' if kind == 'yield' else '%', signed=True) if change is not None else ''
                   color = MUTED if change is None or change == 0 else GREEN if change > 0 else RED
                   price_date = str(record.get('price_date') or '')[:10]
                   if price_date and session and price_date != str(session)[:10]:
@@ -1088,37 +1090,44 @@ jobs:
 
 
           def macro_rows(macro):
+              """Display observations, not fixed empty actual/forecast columns."""
               rows = []
-              for key, title in [('cpi', '소비자물가지수(CPI) · 전년동월비'), ('unemployment', '실업률 · 계절조정')]:
-                  item = macro.get(key) or {}
-                  period = item.get('period') or '기준월 미확인'
-                  rows.append((title, str(period), '실제 ' + rate(item.get('actual'))
-                               + '   |   예상 ' + rate(item.get('forecast'))
-                               + '   |   이전월 ' + rate(item.get('previous'))))
+              cpi = macro.get('cpi') or {}
+              unemployment = macro.get('unemployment') or {}
+              candidates = []
+              if finite(cpi.get('actual')) is not None:
+                  candidates.append(('CPI · 전년동월비', cpi))
+              else:
+                  mom = cpi.get('mom')
+                  latest = cpi.get('latest_available_yoy')
+                  if isinstance(mom, dict) and finite(mom.get('actual')) is not None:
+                      candidates.append(('CPI · 전월비(계절조정)', mom))
+                  elif isinstance(latest, dict) and finite(latest.get('actual', latest.get('value'))) is not None:
+                      candidates.append(('CPI · 최근 확인 전년동월비', dict(latest, actual=latest.get('actual', latest.get('value')))))
+              if finite(unemployment.get('actual')) is not None:
+                  candidates.append(('실업률 · 계절조정', unemployment))
+              for title, item in candidates:
+                  if not item.get('period'):
+                      continue
+                  values = ['발표값 ' + rate(item['actual'])]
+                  if finite(item.get('previous')) is not None:
+                      values.append('이전월 ' + rate(item['previous']))
+                  if finite(item.get('forecast')) is not None:
+                      values.append('시장예상 ' + rate(item['forecast']))
+                  rows.append((title, str(item['period']), '   |   '.join(values)))
               return rows
 
 
           def macro_notes(macro, key):
               item = macro.get(key) or {}
-              notes = []
-              mom = item.get('mom')
-              if key == 'cpi' and isinstance(mom, dict) and finite(mom.get('actual')) is not None:
-                  notes.append('전월비(계절조정) ' + str(mom.get('period', '')) + ': '
-                               + rate(mom['actual']) + ' · 이전월 ' + rate(mom.get('previous')))
+              if key != 'cpi':
+                  return []
               latest = item.get('latest_available_yoy')
-              if key == 'cpi' and isinstance(latest, dict):
+              if finite(item.get('actual')) is None and isinstance(item.get('mom'), dict) and finite(item['mom'].get('actual')) is not None and isinstance(latest, dict):
                   actual = latest.get('actual', latest.get('value'))
                   if finite(actual) is not None and latest.get('period'):
-                      notes.append('최근 확인 가능한 전년동월비: '
-                                   + str(latest['period']) + ' ' + rate(actual))
-              supplied = item.get('note') or item.get('notes')
-              if isinstance(supplied, list):
-                  supplied = next((value for value in supplied if isinstance(value, str) and value), '')
-              if isinstance(supplied, str) and supplied:
-                  notes.append(supplied)
-              elif key == 'cpi' and item.get('period') and finite(item.get('actual')) is None:
-                  notes.append('현재 기준 월의 전년동월비는 미확인입니다.')
-              return notes[:3]
+                      return ['별도 참고 · 전년동월비: ' + str(latest['period']) + ' ' + rate(actual)]
+              return []
 
 
           def _plain(value):
@@ -1211,7 +1220,8 @@ jobs:
               y += 115
 
               gap, tile_width, tile_height = 24, 484, 158
-              for index, (name, value, change, color, unit) in enumerate(metric_rows(quotes, context.get('session'))):
+              displayed_metrics = metric_rows(quotes, context.get('session'))
+              for index, (name, value, change, color, unit) in enumerate(displayed_metrics):
                   x = left + (index % 2) * (tile_width+gap)
                   top = y + (index // 2) * (tile_height+20)
                   draw.rounded_rectangle((x, top, x+tile_width, top+tile_height), radius=16,
@@ -1220,13 +1230,21 @@ jobs:
                   label(value, x+22, top+55, 43, bold=True)
                   label(change, x+22, top+115, 23, color)
                   label(unit, x+tile_width-22-draw.textlength(unit, font=fonts[19]), top+119, 19, MUTED)
-              y += 3*(tile_height+20)+12
+              y += ((len(displayed_metrics)+1)//2)*(tile_height+20)+12
+              if not displayed_metrics:
+                  label('시장 가격을 불러오지 못했습니다. 본문 수집 안내를 확인하세요.', left, y, 23, MUTED)
+                  y += 48
               divider(y)
               y += 28
               label('주요 경제지표', left, y, 28, bold=True)
               label('최신 조회값 · 기준 월 표시', 700, y+6, 19, MUTED)
               y += 51
-              for key, (title, period, values) in zip(('cpi', 'unemployment'), macro_rows(macro)):
+              displayed_macro = macro_rows(macro)
+              if not displayed_macro:
+                  label('경제지표 자료를 불러오지 못했습니다. 본문 안내를 확인하세요.', left, y, 23, MUTED)
+                  y += 48
+              for title, period, values in displayed_macro:
+                  key = 'cpi' if title.startswith('CPI') else 'unemployment'
                   label(title, left, y, 23)
                   label(period, right-draw.textlength(period, font=fonts[21]), y, 21, MUTED)
                   label(values, left, y+38, 25)
@@ -1270,7 +1288,7 @@ jobs:
               y += 22
               label('시장값: Yahoo Finance 일봉  |  CPI·실업률: BLS', left, y, 19, MUTED)
               label('등락은 전일 대비 · 금리 변화는 %p · WTI는 근월물 선물(달러/배럴)', left, y+31, 19, MUTED)
-              label('예상치는 확인된 출처가 없으면 미확인으로 표시합니다.', left, y+62, 19, MUTED)
+              label('확인된 수치만 표시 · 예상치는 출처가 있을 때 표시 · 기준월에 유의', left, y+62, 19, MUTED)
               height = y+106
               if height > image.height:
                   raise ValueError('요약 카드 내용이 최대 높이를 초과했습니다.')
