@@ -1,0 +1,67 @@
+name: Monday Weekend News
+
+on:
+  schedule:
+    - cron: '0 22,23 * * 0'
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'true: 수집만 점검 / false: 실제 채널 발송 (수동 재발송 가능)'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: monday-weekend-news
+  cancel-in-progress: false
+
+jobs:
+  weekend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Plan Monday edition
+        id: plan
+        run: |
+          python - <<'PY'
+          import os
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
+          now = datetime.now(ZoneInfo('Asia/Seoul'))
+          ready = os.getenv('GITHUB_EVENT_NAME') != 'schedule' or now.weekday() == 0
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('date=' + now.date().isoformat() + '\nready=' + str(ready).lower() + '\n')
+          PY
+      - uses: actions/cache/restore@v4
+        id: delivery
+        if: steps.plan.outputs.ready == 'true'
+        with:
+          path: .sent-weekend
+          key: market-weekend-v1-${{ steps.plan.outputs.date }}
+      - name: Install news dependencies
+        if: steps.plan.outputs.ready == 'true' && (github.event_name != 'schedule' || steps.delivery.outputs.cache-hit != 'true')
+        run: python -m pip install requests==2.34.2 feedparser==6.0.14 exchange-calendars==4.13.2
+      - name: Collect and send weekend news
+        id: send
+        if: steps.plan.outputs.ready == 'true' && (github.event_name != 'schedule' || steps.delivery.outputs.cache-hit != 'true')
+        env:
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python scripts/weekend_briefing.py
+      - name: Save weekend delivery marker
+        if: steps.send.outputs.sent == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .sent-weekend
+          key: market-weekend-v1-${{ steps.plan.outputs.date }}
