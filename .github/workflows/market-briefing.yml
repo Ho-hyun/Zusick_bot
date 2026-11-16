@@ -402,30 +402,30 @@ jobs:
                       return None
               market, nvda, soxl = pct('^GSPC'), pct('NVDA'), pct('SOXL')
               if market is None:
-                  return '<b>주간 수익률 미확인. 이번 주는 입도 관망합니다. 🤐</b>' if weekly else '<b>종가 미확인. 오늘은 입도 관망합니다. 🤐</b>'
+                  return '<b>주간 수익률 미확인. 숫자 없으니 입 닫음 🤐</b>' if weekly else '<b>종가 미확인. 숫자 없으니 입 닫음 🤐</b>'
               if nvda is not None and nvda <= -1 and market <= -1:
-                  line = '엔비디아도 지수도 하락. AI가 미래라더니 수익률부터 과거로 돌려놨네 🫠'
+                  line = '엔비디아도 지수도 하락. AI 똑똑하다며. 주가는 왜 이럼 🫠'
                   basis = '엔비디아 ' + _pct(nvda) + ' · S&P 500 ' + _pct(market)
               elif nvda is not None and nvda >= 1 and market < 0:
-                  line = '엔비디아는 상승, 지수는 하락. 황 사장네 잔치에 시장 전체가 초대된 건 아니었네 🫠'
+                  line = '엔비디아는 상승, 지수는 하락. 혼자 신났네. 같이 좀 가자 🙄'
                   basis = '엔비디아 ' + _pct(nvda) + ' · S&P 500 ' + _pct(market)
               elif soxl is not None and soxl <= -5:
-                  line = 'SOXL 급락. 3배로 벌 생각이었는데 반성문부터 3장 쓰게 생겼네 🪦'
+                  line = 'SOXL 급락. 3배로 벌러 왔다가 3배로 혼남 🪦'
                   basis = 'SOXL ' + _pct(soxl) + ' · S&P 500 ' + _pct(market)
               elif market <= -1:
-                  line = '지수 급락. 단타로 들어왔다가 장기투자 철학까지 강제 수강 중 🪦'
+                  line = '지수 하락. 싸다고 샀는데 더 싸짐. 할인 언제 끝남 🫠'
                   basis = 'S&P 500 ' + _pct(market)
               elif market >= 1:
-                  line = '지수 강세. 관망은 공짜인 줄 알았는데 기회비용 청구서가 왔네 🧾'
+                  line = '지수 상승. 떨어지면 산다더니 계속 구경만 함 👀'
                   basis = 'S&P 500 ' + _pct(market)
               elif abs(market) < 0.3:
-                  line = '지수는 제자리. 차트를 이만큼 봤으면 시급이라도 줘야 하는 거 아니냐 🫠'
+                  line = '지수는 제자리. 계속 봤는데 그대로임. 뭐 했냐 진짜 🫠'
                   basis = 'S&P 500 ' + _pct(market)
               elif market > 0:
-                  line = '지수 소폭 상승. 이 정도 초록색으로 설레면 시장한테 너무 쉬운 사람인데 🥲'
+                  line = '지수 살짝 상승. 오르긴 했네. 생색은 금지 🙄'
                   basis = 'S&P 500 ' + _pct(market)
               else:
-                  line = '지수 소폭 하락. 수익은 예약 중인데 손실은 당일 배송이네 📦'
+                  line = '지수 살짝 하락. 조금씩 빼가지 마. 다 보임 👀'
                   basis = 'S&P 500 ' + _pct(market)
               if weekly:
                   line = '이번 주: ' + line
