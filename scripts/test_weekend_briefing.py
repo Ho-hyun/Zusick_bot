@@ -30,9 +30,11 @@ class WeekendTests(unittest.TestCase):
         rows = [{'id': 'n' + str(i), 'title': 'Title', 'url': 'https://example.com/' + str(i)} for i in range(1, 7)]
         summary = {'news': [{'id': r['id'], 'title_ko': '주말 주요 기사', 'summary': '확인된 내용입니다 [n2, n10]', 'impact': '해석: 다음 거래일에 주목합니다.'} for r in rows]}
         messages = build_messages(rows, summary, datetime(2026, 11, 13, 21, tzinfo=UTC), datetime(2026, 11, 15, 22, tzinfo=UTC))
-        self.assertEqual(len(messages), 6)
+        self.assertEqual(len(messages), 7)
+        self.assertIn('주말 이슈로 본 시장 요약', messages[-1][0])
+        self.assertIsNone(messages[-1][1])
         self.assertTrue(all('[n' not in m for m, _ in messages))
-        self.assertTrue(all(url is not None for _, url in messages[1:]))
+        self.assertTrue(all(url is not None for _, url in messages[1:-1]))
         self.assertTrue(all(len(m.encode('utf-16-le')) // 2 <= 3800 for m, _ in messages))
 
     def test_shortfall_disclosed_and_no_english_only_summary_broadcast(self):
