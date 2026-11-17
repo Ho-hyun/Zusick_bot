@@ -145,6 +145,32 @@ jobs:
               sys.path.insert(0, str(Path('scripts').resolve()))
               suite = unittest.defaultTestLoader.discover('scripts', pattern='test_weekend_briefing.py')
               assert unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful()
+              # The primary at 06:53 KST must pass the gate even in standard time.
+              from datetime import datetime, timedelta, timezone
+              from zoneinfo import ZoneInfo
+              plan_match = re.search(r"python - <<'PYTHON'\n(.*?)^          PYTHON$", source, re.M | re.S)
+              assert plan_match
+              plan_code = '\n'.join(line[10:] if line.startswith(' ' * 10) else line for line in plan_match[1].splitlines())
+              gate = next(n for n in ast.parse(plan_code).body if isinstance(n, ast.FunctionDef) and n.name == 'ready_for_delivery')
+              gate_scope = {'ZoneInfo':ZoneInfo}
+              exec(compile(ast.Module(body=[gate],type_ignores=[]),'<schedule-gate>','exec'),gate_scope)
+              ready = gate_scope['ready_for_delivery']
+              for date, close_hour in [('2026-11-17',21),('2026-07-06',20),('2026-11-27',18),('2026-07-02',17)]:
+                  close_time = datetime.fromisoformat(date).replace(hour=close_hour,tzinfo=timezone.utc)
+                  primary = close_time.replace(hour=21,minute=53)
+                  backup = close_time.replace(hour=22,minute=16)
+                  assert ready(primary,close_time,close_time.date(),True)
+                  assert ready(backup,close_time,close_time.date(),True)
+                  assert not ready(primary-timedelta(minutes=1),close_time,close_time.date(),True)
+                  assert not ready(primary,primary+timedelta(minutes=1),close_time.date(),True)
+                  assert not ready(primary+timedelta(days=1),close_time,close_time.date(),True)
+                  assert ready(primary-timedelta(minutes=1),close_time,close_time.date(),False)
+              primary_config = yaml.safe_load(source)
+              weekend_config = yaml.safe_load(Path('.github/workflows/weekend-news.yml').read_text())
+              events = primary_config.get('on',primary_config.get(True))
+              weekend_events = weekend_config.get('on',weekend_config.get(True))
+              assert [x['cron'] for x in events['schedule']] == ['53 21 * * 1-5','16 22 * * 1-5']
+              assert [x['cron'] for x in weekend_events['schedule']] == ['53 21 * * 0','16 22 * * 0']
               print('PASS: workflow syntax; factual roast; valuation rules; missing peers; message layout')
               status, description = 'success', 'Syntax, factual roast, candidate rules and layout passed'
           except Exception as error:

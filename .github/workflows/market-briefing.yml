@@ -14,13 +14,10 @@ on:
         type: choice
         options: [auto, gemini, groq]
   schedule:
-    # KST Tue-Sat 07:00: closing reports after US trading days.
-    # Monday KST 07:00 weekend news is separately scheduled in weekend-news.yml
-    # using UTC Sunday 22:00 (verified existing schedule: '0 22,23 * * 0').
-    - cron: '0 22 * * 1-5'
-    # Recovery attempts at KST 07:13 and 07:33; skip if this session was sent.
-    # Nonzero minutes reduce dependence on GitHub's top-of-hour schedule queue.
-    - cron: '13,33 22 * * 1-5'
+    # UTC Mon-Fri 21:53 / 22:16 = KST Tue-Sat 06:53 / 07:16.
+    # Monday's weekend-news.yml uses the same KST times on its own Sunday UTC cron.
+    - cron: '53 21 * * 1-5'
+    - cron: '16 22 * * 1-5'
 
 permissions:
   contents: read
@@ -63,10 +60,19 @@ jobs:
           previous=cal.previous_session(day)
           scheduled=os.getenv('GITHUB_EVENT_NAME')=='schedule'
 
-          ready=not scheduled or (
-              now.astimezone(ZoneInfo('America/New_York')).date()==day.date()
-              and now>=close.to_pydatetime()+timedelta(hours=1)
-          )
+          def ready_for_delivery(now, close_time, session_date, scheduled=True):
+              if not scheduled:
+                  return True
+              korea_now = now.astimezone(ZoneInfo('Asia/Seoul'))
+              target = korea_now.replace(hour=6, minute=53, second=0, microsecond=0)
+              return (
+                  now.astimezone(ZoneInfo('America/New_York')).date() == session_date
+                  and now >= close_time
+                  and korea_now >= target
+              )
+
+          ready=ready_for_delivery(now, close.to_pydatetime(), day.date(), scheduled)
+
 
           mode=os.getenv('REPORT_MODE','auto')
           weekly=mode=='weekly' or (
